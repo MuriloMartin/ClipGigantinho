@@ -1,19 +1,19 @@
 import cv2
 import time
-from collections import deque
+import threading
 
-CLIP_SIZE = 30
+CLIP_SIZE = 15
+FPS = 25
 # Set up the video capture
-cap = cv2.VideoCapture('http://192.168.0.51:8080/video')
+cap = cv2.VideoCapture('rtsp://admin:elefante123123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0')
 
 # Buffer to store frames (max length to hold 60 seconds worth of video)
-frames_buffer_pos = []
-frames_buffer_neg = []
+frames_buffer = []
 
-current_buffer = 1
+
 
 # Function to save video clip
-def save_clip(buffer, output_path='clip.avi', fps=30, frame_size=(640, 480)):
+def save_clip(buffer, output_path='clip.avi', fps=FPS, frame_size=(640, 480)):
     fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec for AVI format
     out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
     for frame in buffer:
@@ -23,12 +23,12 @@ def save_clip(buffer, output_path='clip.avi', fps=30, frame_size=(640, 480)):
 
 
 
-def combine_buffers(current_buffer, buffer_pos, buffer_neg):
-    crop_frame = 30 * CLIP_SIZE
-    if current_buffer == 1:
-        buffer = buffer_neg + buffer_pos
-    else:
-        buffer = buffer_pos + buffer_neg
+def snip_buffer_start(buffer):
+    snip_frame =(int) (FPS * CLIP_SIZE)
+    return buffer[snip_frame:]
+   
+def crop_frames_buffer(buffer):
+    crop_frame = (int) (FPS * CLIP_SIZE)
     return buffer[-crop_frame:]
    
 
@@ -38,38 +38,27 @@ last_update_time = time.time()
 last_log_time = time.time()
 first_track = True
 while True:
-    ret, frame = cap.read()
+    ret, frame = cap.read() 
     if not ret:
         print("Failed to grab frame. Exiting...")
         break
     
-    if current_buffer == 1:
-        frames_buffer_pos.append(frame)
-    else:
-        frames_buffer_neg.append(frame)
     
+    frames_buffer.append(frame)
+
 
     current_time = time.time()
-    if current_time - last_update_time >= 30:
-        current_buffer = current_buffer * -1
 
-        if current_buffer == 1:
-            frames_buffer_pos = []
+    if current_time - last_update_time >= 15:
+        if first_track:
+            first_track = False
         else:
-            frames_buffer_neg = []
+            last_update_time = current_time
+            frames_buffer = snip_buffer_start(frames_buffer)
 
-        last_update_time = current_time  # Update the last update time
-        new_track_time = time.time()
-        first_track = False
-    
-    if not first_track and current_time - new_track_time >= 30:
-        if current_buffer == 1:
-            frames_buffer_neg = []
-        else:
-            frames_buffer_pos = []
-
-    if current_time - last_log_time >= 2.5:
-        print('Current buffer = {} | Len buffer pos = {} | Len buffer neg = {}'.format(current_buffer,len(frames_buffer_pos), len(frames_buffer_neg)))
+    if current_time - last_log_time >= 1:
+        FPS = cap.get(cv2.CAP_PROP_FPS) 
+        print('Len buffer = {} | FPS = {}'.format(len(frames_buffer), FPS), end='\r',flush=True)
         last_log_time = time.time()
 
     cv2.imshow('Video', frame)
@@ -80,8 +69,10 @@ while True:
         break
     elif key == 32:  # Space key
         print("Saving last 30 seconds as a clip...")
-        buffer = combine_buffers(current_buffer,frames_buffer_pos, frames_buffer_neg)
-        save_clip(buffer, frame_size=(frame.shape[1], frame.shape[0]))
+        buffer = crop_frames_buffer(frames_buffer)
+        # Run save_clip in a separate thread
+        save_thread = threading.Thread(target=save_clip, args=(buffer, 'clip.avi', 30, (frame.shape[1], frame.shape[0])))
+        save_thread.start()
 
 # Clean up
 cap.release()
