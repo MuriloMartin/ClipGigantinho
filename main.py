@@ -1,73 +1,109 @@
-import cv2
+import os
+import subprocess
 import time
+import glob
 import threading
+from pathlib import Path
 
-CLIP_SIZE = 20
-FPS = 30
-# Set up the video capture
-#cap = cv2.VideoCapture(0)
-cap = cv2.VideoCapture('rtsp://admin:elefante123123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0')
+# === CONFIGURATION ===
+RTSP_URL = 'rtsp://admin:elefante123123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0' 
+BUFFER_DIR = 'clips_buffer'
+CLIP_SAVE_DIR = 'clips'
+CLIP_DURATION = 30  
+MAX_BUFFER_SECONDS = 35  
 
-frames_buffer = []
+# === Setup ===
+Path(BUFFER_DIR).mkdir(exist_ok=True)
+Path(CLIP_SAVE_DIR).mkdir(exist_ok=True)
 
-
-
-# Function to save video clip
-def save_clip(buffer, output_dir='clips', fps=FPS, frame_size=(640, 480)):
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    output_path = f"{output_dir}/clip_{timestamp}.avi"
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec for AVI format
-    out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
-    for frame in buffer:
-        out.write(frame)
-    out.release()
-    print(f"Saved clip to {output_path}")
-
-
-
-def snip_buffer_start(buffer):
-    snip_frame =(int) (FPS * CLIP_SIZE)
-    return buffer[snip_frame:]
-   
-def crop_frames_buffer(buffer):
-    crop_frame = (int) (FPS * CLIP_SIZE)
-    return buffer[-crop_frame:]
-   
+def start_ffmpeg_segmenter():
+    print("[FFMPEG] Starting segmenter...")
+    cmd = [
+        'ffmpeg',
+        '-rtsp_transport', 'tcp',
+        '-i', RTSP_URL,
+        '-c:v', 'copy',        
+        '-c:a', 'aac',         
+        '-b:a', '128k',        
+        '-f', 'segment',
+        '-segment_time', '1',
+        '-reset_timestamps', '1',
+        '-strftime', '1',
+        f'{BUFFER_DIR}/%Y%m%d_%H%M%S.mp4'
+    ]
+    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
 
-# Initialize a variable to track the last update time
-last_update_time = time.time()
-last_log_time = time.time()
-first_track = True
-while True:
-    ret, frame = cap.read() 
-    if not ret:
-        print("Failed to grab frame. Exiting...")
-        break
-    
-    
-    frames_buffer.append(frame)
 
-    if len(frames_buffer) > FPS * CLIP_SIZE:
-        frames_buffer.pop(0)
-    
+def get_last_n_clips(n):
+    files = sorted(glob.glob(f"{BUFFER_DIR}/*.mp4"))
+    return files[-n:]
 
-    
-    print('Len buffer = {} | FPS = {}'.format(len(frames_buffer), FPS), end='\r',flush=True)
+def save_clip_from_buffer():
+    clips = get_last_n_clips(CLIP_DURATION)
+    if len(clips) < CLIP_DURATION:
+        print("[SAVE] Not enough data yet.")
+        return
 
-    cv2.imshow('Video', frame)
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    output_file = f"{CLIP_SAVE_DIR}/clip_{timestamp}.mp4"
+    input_txt = f"inputs_{timestamp}.txt"
 
-    key = cv2.waitKey(1) & 0xFF
-    if key == 27:  # Escape key
-        print("Exiting...")
-        break
-    elif key == 32:  # Space key
-        print("Saving last 30 seconds as a clip...")
-        buffer = crop_frames_buffer(frames_buffer)
-        # Run save_clip in a separate thread
-        save_thread = threading.Thread(target=save_clip, args=(buffer, 'clips', 30, (frame.shape[1], frame.shape[0])))
-        save_thread.start()
+    with open(input_txt, 'w') as f:
+        for clip in clips:
+            f.write(f"file '{os.path.abspath(clip)}'\n")
 
-# Clean up
-cap.release()
-cv2.destroyAllWindows() 
+    cmd = [
+        'ffmpeg', '-y',
+        '-f', 'concat', '-safe', '0',
+        '-i', input_txt,
+        '-c', 'copy',
+        output_file
+    ]
+
+    subprocess.run(cmd)
+    os.remove(input_txt)
+    print(f"[SAVE] Saved clip to: {output_file}")
+
+def cleanup_old_clips():
+    files = sorted(glob.glob(f"{BUFFER_DIR}/*.mp4"))
+    if len(files) <= MAX_BUFFER_SECONDS:
+        return
+    to_delete = files[:-MAX_BUFFER_SECONDS]
+    for f in to_delete:
+        try:
+            os.remove(f)
+        except Exception as e:
+            print(f"[CLEANUP] Failed to remove {f}: {e}")
+
+def background_cleaner():
+    while True:
+        cleanup_old_clips()
+        time.sleep(5)
+
+def clear_buffer():
+    files = glob.glob(f"{BUFFER_DIR}/*.mp4")
+    for f in files:
+        os.remove(f)
+
+def main():
+    clear_buffer()
+    ffmpeg_proc = start_ffmpeg_segmenter()
+    cleaner_thread = threading.Thread(target=background_cleaner, daemon=True)
+    cleaner_thread.start()
+
+    print("[SYSTEM] Press 's' + Enter to save last 30 seconds, 'q' + Enter to quit.")
+    try:
+        while True:
+            key = input().strip().lower()
+            if key == 's':
+                save_clip_from_buffer()
+            elif key == 'q':
+                break
+    finally:
+        print("[SYSTEM] Exiting...")
+        ffmpeg_proc.terminate()
+        ffmpeg_proc.wait()
+
+if __name__ == '__main__':
+    main()
