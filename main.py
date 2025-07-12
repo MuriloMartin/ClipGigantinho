@@ -2,18 +2,20 @@ import cv2
 import time
 import threading
 
-CLIP_SIZE = 15
-FPS = 25
+CLIP_SIZE = 20
+FPS = 30
 # Set up the video capture
+#cap = cv2.VideoCapture(0)
 cap = cv2.VideoCapture('rtsp://admin:elefante123123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0')
 
-# Buffer to store frames (max length to hold 60 seconds worth of video)
 frames_buffer = []
 
 
 
 # Function to save video clip
-def save_clip(buffer, output_path='clip.avi', fps=FPS, frame_size=(640, 480)):
+def save_clip(buffer, output_dir='clips', fps=FPS, frame_size=(640, 480)):
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    output_path = f"{output_dir}/clip_{timestamp}.avi"
     fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec for AVI format
     out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
     for frame in buffer:
@@ -46,20 +48,12 @@ while True:
     
     frames_buffer.append(frame)
 
+    if len(frames_buffer) > FPS * CLIP_SIZE:
+        frames_buffer.pop(0)
+    
 
-    current_time = time.time()
-
-    if current_time - last_update_time >= 15:
-        if first_track:
-            first_track = False
-        else:
-            last_update_time = current_time
-            frames_buffer = snip_buffer_start(frames_buffer)
-
-    if current_time - last_log_time >= 1:
-        FPS = cap.get(cv2.CAP_PROP_FPS) 
-        print('Len buffer = {} | FPS = {}'.format(len(frames_buffer), FPS), end='\r',flush=True)
-        last_log_time = time.time()
+    
+    print('Len buffer = {} | FPS = {}'.format(len(frames_buffer), FPS), end='\r',flush=True)
 
     cv2.imshow('Video', frame)
 
@@ -71,7 +65,7 @@ while True:
         print("Saving last 30 seconds as a clip...")
         buffer = crop_frames_buffer(frames_buffer)
         # Run save_clip in a separate thread
-        save_thread = threading.Thread(target=save_clip, args=(buffer, 'clip.avi', 30, (frame.shape[1], frame.shape[0])))
+        save_thread = threading.Thread(target=save_clip, args=(buffer, 'clips', 30, (frame.shape[1], frame.shape[0])))
         save_thread.start()
 
 # Clean up
