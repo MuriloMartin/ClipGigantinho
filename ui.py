@@ -10,38 +10,46 @@ def main():
     root.attributes('-fullscreen', True)
     root.configure(bg='black')
     root.bind("<Escape>", lambda e: root.destroy())
+
     buffering_on = tk.BooleanVar(value=True)
-    
-    # Configure grid layout
+
+    # === Grid layout ===
     root.grid_columnconfigure(0, weight=1, uniform="group1")
     root.grid_columnconfigure(1, weight=4, uniform="group1")
     root.grid_rowconfigure(0, weight=1)
 
-    # === Video Frame ===
+    # === Right: Video ===
     video_frame = tk.Frame(root, bg='black')
     video_frame.grid(row=0, column=1, sticky='nsew')
     video_label = tk.Label(video_frame, bg='black')
     video_label.place(relx=0.5, rely=0.5, anchor='center')
 
-    # === UI controls ===
+    # === Left: Controls ===
     utils_frame = tk.Frame(root, bg='gray20')
     utils_frame.grid(row=0, column=0, sticky='nsew')
+    utils_frame.grid_rowconfigure(0, weight=1)
+    utils_frame.grid_rowconfigure(1, weight=2)
+    utils_frame.grid_rowconfigure(2, weight=2)
 
-    # === BUTTONS FRAME ===
-    buttons_frame = tk.Frame(utils_frame, bg="pink")
-    buttons_frame.pack(side="top", pady=50) 
+    # === Toggle Buffering Switch ===
+    toggle_frame = tk.Frame(utils_frame, bg='gray20')
+    toggle_frame.grid(row=0, column=0, pady=20, padx=20, sticky='n')
+    toggle_label = tk.Label(toggle_frame, text="Toggle buffer switch", fg="white", bg="gray20")
+    toggle_label.pack(pady=(0, 5))
+    toggle_btn = ttk.Checkbutton(toggle_frame, variable=buffering_on, onvalue=True, offvalue=False)
+    toggle_btn.pack()
 
-    # === List FRAME ===
-    list_frame = tk.Frame(utils_frame, bg="blue")
-    list_frame.pack(side="bottom", pady=50)  
+    # === Save 30s Button ===
+    save_btn_frame = tk.Frame(utils_frame, bg='gray25', bd=2, relief='ridge')
+    save_btn_frame.grid(row=1, column=0, padx=20, pady=10, sticky='nsew')
+    save_btn = ttk.Button(save_btn_frame, text="SAVE 30s button")
+    save_btn.place(relx=0.5, rely=0.5, anchor='center')
 
-    # Toggle Buffering Button
-    toggle_btn = ttk.Button(buttons_frame, text="Toggle Buffering")
-    toggle_btn.pack(pady=10, ipadx=10, ipady=5)
-
-    # Save Clip Button
-    save_btn = ttk.Button(buttons_frame, text="Save last 30s")
-    save_btn.pack(pady=10, ipadx=10, ipady=5)
+    # === Clips Save List Placeholder ===
+    list_frame = tk.Frame(utils_frame, bg='gray30', bd=2, relief='ridge')
+    list_frame.grid(row=2, column=0, padx=20, pady=10, sticky='nsew')
+    list_label = tk.Label(list_frame, text="CLIPS SAVE LIST", fg="white", bg="gray30")
+    list_label.place(relx=0.5, rely=0.5, anchor='center')
 
     # === OpenCV setup ===
     cap = cv2.VideoCapture(0)
@@ -49,21 +57,16 @@ def main():
     def update_video():
         ret, frame = cap.read()
         if ret:
-            # Convert frame to RGB and then to ImageTk
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
-            
-            root.update_idletasks()  # Forces geometry calculation
-
             imgtk = ImageTk.PhotoImage(image=img)
-            video_label.imgtk = imgtk  # Keep reference
+            video_label.imgtk = imgtk
             video_label.config(image=imgtk)
 
-        video_label.after(66, update_video)  # Refresh every ~30 ms
+        video_label.after(66, update_video)
 
     update_video()
     root.mainloop()
-
     cap.release()
 
 if __name__ == "__main__":
