@@ -2,16 +2,35 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 import cv2
+import os
+from main import get_files_list, save_clip_from_buffer, start_buffering, RTSP_URL, clear_buffer
 
-RTSP_URL = "rtsp://admin:elefante123123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
 
-def main():
+
+
+def main(ffmpeg_proc):
     root = tk.Tk()
     root.attributes('-fullscreen', True)
     root.configure(bg='black')
-    root.bind("<Escape>", lambda e: root.destroy())
 
-    buffering_on = tk.BooleanVar(value=True)
+    def refresh_list():
+        files = get_files_list()
+        listbox.delete(0, tk.END)
+        for f in files:
+            listbox.insert(tk.END, f)
+
+    def on_key_press(event):
+        print(f"Key pressed: {event.keysym}")
+        if event.keysym in ("space", "Return"): 
+            save_clip_from_buffer()
+            refresh_list()
+        elif event.keysym == "Escape":
+            root.destroy()
+            clear_buffer()
+            ffmpeg_proc.terminate()
+            ffmpeg_proc.wait()
+
+    root.bind("<Key>", on_key_press)
 
     # === Grid layout ===
     root.grid_columnconfigure(0, weight=1, uniform="group1")
@@ -24,50 +43,51 @@ def main():
     video_label = tk.Label(video_frame, bg='black')
     video_label.place(relx=0.5, rely=0.5, anchor='center')
 
-    # === Left: Controls ===
+    # === Left: Controls (utils_frame) ===
     utils_frame = tk.Frame(root, bg='gray20')
     utils_frame.grid(row=0, column=0, sticky='nsew')
+
     utils_frame.grid_rowconfigure(0, weight=1)
-    utils_frame.grid_rowconfigure(1, weight=2)
-    utils_frame.grid_rowconfigure(2, weight=2)
+    utils_frame.grid_columnconfigure(0, weight=1)
 
-    # === Toggle Buffering Switch ===
-    toggle_frame = tk.Frame(utils_frame, bg='gray20')
-    toggle_frame.grid(row=0, column=0, pady=20, padx=20, sticky='n')
-    toggle_label = tk.Label(toggle_frame, text="Toggle buffer switch", fg="white", bg="gray20")
-    toggle_label.pack(pady=(0, 5))
-    toggle_btn = ttk.Checkbutton(toggle_frame, variable=buffering_on, onvalue=True, offvalue=False)
-    toggle_btn.pack()
+    listbox = tk.Listbox(utils_frame, bg='gray30', fg='white', bd=2, relief='ridge',
+                         font=('Arial', 14))
+    listbox.grid(row=0, column=0, sticky='nsew')
 
-    # === Save 30s Button ===
-    save_btn_frame = tk.Frame(utils_frame, bg='gray25', bd=2, relief='ridge')
-    save_btn_frame.grid(row=1, column=0, padx=20, pady=10, sticky='nsew')
-    save_btn = ttk.Button(save_btn_frame, text="SAVE 30s button")
-    save_btn.place(relx=0.5, rely=0.5, anchor='center')
+    scrollbar = tk.Scrollbar(utils_frame, orient='vertical', command=listbox.yview)
+    scrollbar.grid(row=0, column=1, sticky='ns')
+    listbox.config(yscrollcommand=scrollbar.set)
 
-    # === Clips Save List Placeholder ===
-    list_frame = tk.Frame(utils_frame, bg='gray30', bd=2, relief='ridge')
-    list_frame.grid(row=2, column=0, padx=20, pady=10, sticky='nsew')
-    list_label = tk.Label(list_frame, text="CLIPS SAVE LIST", fg="white", bg="gray30")
-    list_label.place(relx=0.5, rely=0.5, anchor='center')
+    refresh_list()
 
     # === OpenCV setup ===
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(
+        RTSP_URL,
+        cv2.CAP_FFMPEG
+    )
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     def update_video():
         ret, frame = cap.read()
         if ret:
+            frame = cv2.resize(frame, (960, 540))  # adjust to fit your layout
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
             imgtk = ImageTk.PhotoImage(image=img)
             video_label.imgtk = imgtk
             video_label.config(image=imgtk)
 
-        video_label.after(66, update_video)
+        video_label.after(10, update_video)  # ~30 FPS
 
     update_video()
+
+    def on_close():
+        cap.release()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
     root.mainloop()
-    cap.release()
 
 if __name__ == "__main__":
-    main()
+    ffmpeg_proc = start_buffering()
+    main(ffmpeg_proc)

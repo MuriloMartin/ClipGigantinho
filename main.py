@@ -22,15 +22,21 @@ def start_ffmpeg_segmenter():
         'ffmpeg',
         '-rtsp_transport', 'tcp',
         '-i', RTSP_URL,
-        '-c:v', 'copy',        
-        '-c:a', 'aac',         
-        '-b:a', '128k',        
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',          # faster encoding
+        '-tune', 'zerolatency',         # helps with RTSP
+        '-g', '30',                     
+        '-keyint_min', '30',
+        '-sc_threshold', '0',
+        '-c:a', 'aac',
+        '-b:a', '128k',
         '-f', 'segment',
         '-segment_time', '1',
         '-reset_timestamps', '1',
         '-strftime', '1',
         f'{BUFFER_DIR}/%Y%m%d_%H%M%S.mp4'
     ]
+
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
 
@@ -86,24 +92,16 @@ def clear_buffer():
     for f in files:
         os.remove(f)
 
-def main():
+def get_files_list():
+    try:
+        return [f for f in os.listdir(CLIP_SAVE_DIR) if f.endswith('.mp4')]
+    except FileNotFoundError:
+        return []
+
+def start_buffering():
     clear_buffer()
     ffmpeg_proc = start_ffmpeg_segmenter()
     cleaner_thread = threading.Thread(target=background_cleaner, daemon=True)
     cleaner_thread.start()
+    return ffmpeg_proc
 
-    print("[SYSTEM] Press 's' + Enter to save last 30 seconds, 'q' + Enter to quit.")
-    try:
-        while True:
-            key = input().strip().lower()
-            if key == 's':
-                save_clip_from_buffer()
-            elif key == 'q':
-                break
-    finally:
-        print("[SYSTEM] Exiting...")
-        ffmpeg_proc.terminate()
-        ffmpeg_proc.wait()
-
-if __name__ == '__main__':
-    main()
